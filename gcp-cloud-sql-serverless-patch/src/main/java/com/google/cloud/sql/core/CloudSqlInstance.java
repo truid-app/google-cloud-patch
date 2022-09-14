@@ -43,7 +43,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.net.ssl.SSLSocket;
@@ -79,9 +78,6 @@ class CloudSqlInstance {
   @GuardedBy("instanceDataGuard")
   private ListenableFuture<InstanceData> currentInstanceData;
 
-  @GuardedBy("instanceDataGuard")
-  private ListenableFuture<ListenableFuture<InstanceData>> nextInstanceData;
-
   /**
    * Initializes a new Cloud SQL instance based on the given connection name.
    *
@@ -98,6 +94,8 @@ class CloudSqlInstance {
       ListeningScheduledExecutorService executor,
       ListenableFuture<KeyPair> keyPair)
       throws IOException, InterruptedException {
+
+    logger.log(Level.INFO, "Using patched CloudSqlInstance");
 
     this.instanceName = new CloudSqlInstanceName(connectionName);
 
@@ -118,7 +116,6 @@ class CloudSqlInstance {
     // Kick off initial async jobs
     synchronized (instanceDataGuard) {
       this.currentInstanceData = performRefresh();
-      this.nextInstanceData = Futures.immediateFuture(currentInstanceData);
     }
   }
 
@@ -158,17 +155,6 @@ class CloudSqlInstance {
     }
     // If the time until the certificate expires is longer than an hour, return timeUntilExp//2
     return timeUntilExp.dividedBy(2).getSeconds();
-  }
-
-  static GoogleCredentials getDownscopedCredentials(OAuth2Credentials credentials) {
-    GoogleCredentials downscoped;
-    try {
-      GoogleCredentials oldCredentials = (GoogleCredentials) credentials;
-      downscoped = oldCredentials.createScoped(SQL_LOGIN_SCOPE);
-    } catch (ClassCastException ex) {
-      throw new RuntimeException("Failed to downscope credentials for IAM Authentication:", ex);
-    }
-    return downscoped;
   }
 
   private OAuth2Credentials parseCredentials(HttpRequestInitializer source) {
@@ -221,6 +207,7 @@ class CloudSqlInstance {
    * block until required instance data is available.
    */
   SSLSocket createSslSocket() throws IOException {
+    refreshIfExpired();
     return (SSLSocket) getInstanceData().getSslContext().getSocketFactory().createSocket();
   }
 
@@ -249,19 +236,36 @@ class CloudSqlInstance {
   }
 
   /**
+   * Attempts to force a new refresh of the instance data if the current data is close to expiry.
+   * May fail if called too frequently or if new refresh is already in progress. If successful,
+   * other methods will block until refresh has been completed.
+   */
+  private void refreshIfExpired() {
+    synchronized (instanceDataGuard) {
+      if (currentInstanceData.isDone()) {
+        try {
+          InstanceData instanceData = currentInstanceData.get();
+          if (needRefresh(instanceData)) {
+            currentInstanceData = performRefresh();
+          }
+        } catch (InterruptedException | ExecutionException e) {
+          throw new RuntimeException(e);
+        }
+      }
+    }
+  }
+
+  /**
    * Attempts to force a new refresh of the instance data. May fail if called too frequently or if a
    * new refresh is already in progress. If successful, other methods will block until refresh has
    * been completed.
    */
   void forceRefresh() throws InterruptedException {
+    logger.finer("forceRefresh()");
+
     synchronized (instanceDataGuard) {
-      // If a scheduled refresh hasn't started, perform one immediately
-      if (nextInstanceData.cancel(false)) {
+      if (currentInstanceData.isDone()) {
         currentInstanceData = performRefresh();
-        nextInstanceData = Futures.immediateFuture(currentInstanceData);
-      } else {
-        // Otherwise it's already running, so just block on the results
-        currentInstanceData = blockOnNestedFuture(nextInstanceData, executor);
       }
     }
   }
@@ -272,16 +276,17 @@ class CloudSqlInstance {
    * would expire.
    */
   private ListenableFuture<InstanceData> performRefresh() throws InterruptedException {
+    logger.finest("performRefresh()");
+
     // To avoid unreasonable SQL Admin API usage, use a rate limit to throttle our usage.
     forcedRenewRateLimiter.acquirePermit();
 
     ListenableFuture<InstanceData> refreshFuture;
     if (authType == AuthType.IAM) {
       if (credentials.isPresent()) {
-        GoogleCredentials downscopedCredentials = getDownscopedCredentials(credentials.get());
         refreshFuture =
             apiFetcher.getInstanceData(
-                instanceName, downscopedCredentials, AuthType.IAM, executor, keyPair);
+                instanceName, credentials.get(), AuthType.IAM, executor, keyPair);
       } else {
         throw new RuntimeException(
             String.format(
@@ -301,12 +306,6 @@ class CloudSqlInstance {
             synchronized (instanceDataGuard) {
               // update currentInstanceData with the most recent results
               currentInstanceData = refreshFuture;
-              // schedule a replacement before the SSLContext expires;
-              nextInstanceData =
-                  executor.schedule(
-                      () -> performRefresh(),
-                      secondsUntilRefresh(getInstanceData().getExpiration()),
-                      TimeUnit.SECONDS);
             }
           }
 
@@ -329,7 +328,7 @@ class CloudSqlInstance {
                 currentInstanceData = refreshFuture;
               }
               try {
-                nextInstanceData = Futures.immediateFuture(performRefresh());
+                performRefresh();
               } catch (InterruptedException e) {
                 throw new RuntimeException(e);
               }
@@ -345,7 +344,21 @@ class CloudSqlInstance {
     return Optional.ofNullable(credentials.getExpirationTimeMilliseconds()).map(Date::new);
   }
 
+  private boolean needRefresh(InstanceData instanceData) {
+    Duration refreshBuffer = DEFAULT_REFRESH_BUFFER;
+    Date expiration = instanceData.getExpiration();
+    Duration timeUntilRefresh = Duration.between(Instant.now(), expiration.toInstant())
+        .minus(refreshBuffer);
+
+    if (timeUntilRefresh.isNegative()) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
   SslData getSslData() {
+    refreshIfExpired();
     return getInstanceData().getSslData();
   }
 }
