@@ -62,7 +62,6 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -132,6 +131,8 @@ class CloudSqlInstance {
       CredentialFactory tokenSourceFactory,
       ListeningScheduledExecutorService executor,
       ListenableFuture<KeyPair> keyPair) {
+
+    logger.log(Level.INFO, "Using patched CloudSqlInstance");
 
     Matcher matcher = CONNECTION_NAME.matcher(connectionName);
     checkArgument(
@@ -269,6 +270,9 @@ class CloudSqlInstance {
    * block until required instance data is available.
    */
   SSLSocket createSslSocket() throws IOException {
+    if (needRefresh()) {
+      forceRefresh();
+    }
     return (SSLSocket) getInstanceData().getSslContext().getSocketFactory().createSocket();
   }
 
@@ -304,13 +308,13 @@ class CloudSqlInstance {
    * @return {@code true} if successfully scheduled, or {@code false} otherwise.
    */
   boolean forceRefresh() {
+    logger.fine("forceRefresh()");
+
     synchronized (instanceDataGuard) {
-      // If a scheduled refresh hasn't started, perform one immediately
-      if (nextInstanceData.cancel(false)) {
+      if (nextInstanceData.isDone()) {
         currentInstanceData = performRefresh();
         nextInstanceData = Futures.immediateFuture(currentInstanceData);
       } else {
-        // Otherwise it's already running, so just block on the results
         currentInstanceData = blockOnNestedFuture(nextInstanceData, executor);
       }
       return true;
@@ -372,11 +376,6 @@ class CloudSqlInstance {
             synchronized (instanceDataGuard) {
               // update currentInstanceData with the most recent results
               currentInstanceData = refreshFuture;
-              // schedule a replacement before the SSLContext expires;
-              nextInstanceData = executor
-                  .schedule(() -> performRefresh(),
-                      secondsUntilRefresh(),
-                      TimeUnit.SECONDS);
             }
           }
 
@@ -564,21 +563,25 @@ class CloudSqlInstance {
     return credentials.get().getAccessToken().getExpirationTime();
   }
 
-  private long secondsUntilRefresh() {
+  private boolean needRefresh() {
+    InstanceData instanceData = null;
+    try {
+      instanceData = getInstanceData();
+    } catch (Exception e) {
+      // this means the result was invalid
+      return true;
+    }
+
     Duration refreshBuffer = enableIamAuth ? IAM_AUTH_REFRESH_BUFFER : DEFAULT_REFRESH_BUFFER;
-
-    Date expiration = getInstanceData().getExpiration();
-
+    Date expiration = instanceData.getExpiration();
     Duration timeUntilRefresh = Duration.between(Instant.now(), expiration.toInstant())
         .minus(refreshBuffer);
 
     if (timeUntilRefresh.isNegative()) {
-      // If the time until the certificate expires is less than the buffer, schedule the refresh
-      // closer to the expiration time
-      timeUntilRefresh = Duration.between(Instant.now(), expiration.toInstant())
-          .minus(Duration.ofSeconds(5));
+      return true;
+    } else {
+      return false;
     }
-    return timeUntilRefresh.getSeconds();
   }
 
   /**
@@ -627,6 +630,9 @@ class CloudSqlInstance {
   }
 
   SslData getSslData() {
+    if (needRefresh()) {
+      forceRefresh();
+    }
     return getInstanceData().getSslData();
   }
 
