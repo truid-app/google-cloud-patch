@@ -5,7 +5,7 @@
   <groupId>me.veritru.gcp</groupId>
   <artifactId>gcp-cloud-sql-serverless-patch</artifactId>
   <packaging>jar</packaging>
-  <version>1.0-SNAPSHOT</version>
+  <version>1.6.3-1.0-SNAPSHOT</version>
   <name>gcp-cloud-sql-serverless-patch</name>
 
   <dependencies>
@@ -17,6 +17,13 @@
   </dependencies>
 
   <build>
+    <extensions>
+      <extension>
+        <groupId>com.google.cloud.artifactregistry</groupId>
+        <artifactId>artifactregistry-maven-wagon</artifactId>
+        <version>2.1.4</version>
+      </extension>
+    </extensions>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -29,4 +36,11 @@
       </plugin>
     </plugins>
   </build>
+
+  <distributionManagement>
+    <repository>
+      <id>maven-inhouse</id>
+      <url>artifactregistry://europe-north1-maven.pkg.dev/veritru-dev-332314/maven-inhouse</url>
+    </repository>
+  </distributionManagement>
 </project>
