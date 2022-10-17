@@ -78,7 +78,7 @@ public final class CoreSocketFactory {
 
   private static final Logger logger = Logger.getLogger(CoreSocketFactory.class.getName());
 
-  private static final String DEFAULT_IP_TYPES = "PUBLIC,PRIVATE";
+  private static final String DEFAULT_IP_TYPES = "PRIVATE,PUBLIC";
 
   // Test properties, not for end-user use. May be changed or removed without notice.
   private static final String API_ROOT_URL_PROPERTY = "_CLOUD_SQL_API_ROOT_URL";
