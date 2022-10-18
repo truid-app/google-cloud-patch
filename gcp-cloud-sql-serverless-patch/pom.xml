@@ -5,7 +5,7 @@
   <groupId>me.veritru.gcp</groupId>
   <artifactId>gcp-cloud-sql-serverless-patch</artifactId>
   <packaging>jar</packaging>
-  <version>1.6.3-1.0-SNAPSHOT</version>
+  <version>1.6.3-1.1-SNAPSHOT</version>
   <name>gcp-cloud-sql-serverless-patch</name>
 
   <dependencies>
