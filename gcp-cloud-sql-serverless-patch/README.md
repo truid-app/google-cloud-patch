@@ -1,9 +1,9 @@
 # Google Cloud SQL Connector patch
 
 This is a patch for CloudSqlInstance.java that fixes a problem in
-`com.google.cloud.sql:jdbc-socket-factory-core:1.6.3` when running in a serverless environment.
+`com.google.cloud.sql:jdbc-socket-factory-core:1.7.2` when running in a serverless environment.
 
-Original file copied from https://github.com/GoogleCloudPlatform/cloud-sql-jdbc-socket-factory/blob/v1.6.3/core/src/main/java/com/google/cloud/sql/core/CloudSqlInstance.java
+Original file copied from https://github.com/GoogleCloudPlatform/cloud-sql-jdbc-socket-factory/blob/v1.7.2/core/src/main/java/com/google/cloud/sql/core/CloudSqlInstance.java
 
 ## Background
 
