@@ -42,24 +42,16 @@ import com.google.errorprone.annotations.concurrent.GuardedBy;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.security.GeneralSecurityException;
-import java.security.KeyPair;
-import java.security.KeyStore;
+import java.security.*;
 import java.security.KeyStore.PasswordProtection;
 import java.security.KeyStore.PrivateKeyEntry;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -449,7 +441,10 @@ class CloudSqlInstance {
 
       sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), new SecureRandom());
 
-      return new SslData(sslContext, kmf, tmf);
+      String certificateId = Base64.getUrlEncoder().encodeToString(MessageDigest.getInstance("SHA256").digest(ephemeralCertificate.getPublicKey().getEncoded()));
+      logger.info("Storing ephemeral SSL certificate " + certificateId);
+
+      return new SslData(sslContext, kmf, tmf, certificateId);
     } catch (GeneralSecurityException | IOException ex) {
       throw new RuntimeException(
           String.format(
@@ -598,6 +593,7 @@ class CloudSqlInstance {
         .minus(refreshBuffer);
 
     if (timeUntilRefresh.isNegative()) {
+      logger.info("Need refresh of " + instanceData.getSslData().getCertificateId() + ", expired at " + expiration);
       return true;
     } else {
       return false;
@@ -686,6 +682,7 @@ class CloudSqlInstance {
     }
 
     SslData getSslData() {
+      logger.info("Using ephemeral SSL certificate " + sslData.getCertificateId());
       return sslData;
     }
   }
