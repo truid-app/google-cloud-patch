@@ -441,7 +441,7 @@ class CloudSqlInstance {
 
       sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), new SecureRandom());
 
-      String certificateId = Base64.getUrlEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(ephemeralCertificate.getPublicKey().getEncoded()));
+      String certificateId = Base64.getUrlEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(ephemeralCertificate.getEncoded()));
       logger.info("Storing ephemeral SSL certificate " + certificateId);
 
       return new SslData(sslContext, kmf, tmf, certificateId);
