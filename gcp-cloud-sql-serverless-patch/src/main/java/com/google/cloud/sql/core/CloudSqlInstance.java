@@ -522,9 +522,15 @@ class CloudSqlInstance {
 
     if (enableIamAuth) {
       try {
-        GoogleCredentials downscoped = getDownscopedCredentials(credentials.get());
-        downscoped.refresh();
-        String token = downscoped.getAccessToken().getTokenValue();
+        //
+        // Revert https://github.com/GoogleCloudPlatform/cloud-sql-jdbc-socket-factory/pull/999
+        //
+        // GoogleCredentials downscoped = getDownscopedCredentials(credentials.get());
+        // downscoped.refresh();
+        // String token = downscoped.getAccessToken().getTokenValue();
+        credentials.get().refresh();
+        String token = credentials.get().getAccessToken().getTokenValue();
+
         // TODO: remove this once issue with OAuth2 Tokens is resolved.
         // See: https://github.com/GoogleCloudPlatform/cloud-sql-jdbc-socket-factory/issues/565
         request.setAccessToken(CharMatcher.is('.').trimTrailingFrom(token));
