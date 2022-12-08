@@ -258,7 +258,7 @@ public class OAuth2Credentials extends Credentials {
                         }
                     });
 
-            refreshTask = new RefreshTask(task, new RefreshTaskListener(task));
+            refreshTask = new RefreshTask(task);
 
             return new AsyncRefreshResult(refreshTask, true);
         }
@@ -573,37 +573,18 @@ public class OAuth2Credentials extends Credentials {
         }
     }
 
-    @VisibleForTesting
-    class RefreshTaskListener implements Runnable {
-        private ListenableFutureTask<OAuthValue> task;
-
-        RefreshTaskListener(ListenableFutureTask<OAuthValue> task) {
-            this.task = task;
-        }
-
-        @Override
-        public void run() {
-            finishRefreshAsync(task);
-        }
-    }
-
     class RefreshTask extends AbstractFuture<OAuthValue> implements Runnable {
         private final ListenableFutureTask<OAuthValue> task;
-        private final RefreshTaskListener listener;
 
-        RefreshTask(ListenableFutureTask<OAuthValue> task, RefreshTaskListener listener) {
+        RefreshTask(ListenableFutureTask<OAuthValue> task) {
             this.task = task;
-            this.listener = listener;
 
-            // Update Credential state first
-            task.addListener(listener, MoreExecutors.directExecutor());
-
-            // Then notify the world
             Futures.addCallback(
                 task,
                 new FutureCallback<OAuthValue>() {
                     @Override
                     public void onSuccess(OAuthValue result) {
+                        finishRefreshAsync(task);
                         RefreshTask.this.set(result);
                     }
 
