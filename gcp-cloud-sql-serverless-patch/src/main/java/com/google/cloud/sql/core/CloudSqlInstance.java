@@ -104,9 +104,6 @@ class CloudSqlInstance {
   @GuardedBy("instanceDataGuard")
   private ListenableFuture<InstanceData> currentInstanceData;
 
-  @GuardedBy("instanceDataGuard")
-  private ListenableFuture<ListenableFuture<InstanceData>> nextInstanceData;
-
   // Limit forced refreshes to 1 every minute.
   private final RateLimiter forcedRenewRateLimiter = RateLimiter.create(1.0 / 60.0);
 
@@ -158,7 +155,6 @@ class CloudSqlInstance {
     // Kick off initial async jobs
     synchronized (instanceDataGuard) {
       this.currentInstanceData = performRefresh();
-      this.nextInstanceData = Futures.immediateFuture(currentInstanceData);
     }
   }
 
@@ -265,9 +261,7 @@ class CloudSqlInstance {
    * block until required instance data is available.
    */
   SSLSocket createSslSocket() throws IOException {
-    if (needRefresh()) {
-      forceRefresh();
-    }
+    refreshIfExpired();
     return (SSLSocket) getInstanceData().getSslContext().getSocketFactory().createSocket();
   }
 
@@ -296,21 +290,23 @@ class CloudSqlInstance {
   }
 
   /**
-   * Attempts to force a new refresh of the instance data. May fail if called too frequently or if a
-   * new refresh is already in progress. If successful, other methods will block until refresh has
-   * been completed.
+   * Attempts to force a new refresh of the instance data if the current data is close to expiry.
+   * May fail if called too frequently or if new refresh is already in progress. If successful,
+   * other methods will block until refresh has been completed.
    *
    * @return {@code true} if successfully scheduled, or {@code false} otherwise.
    */
-  boolean forceRefresh() {
-    logger.fine("forceRefresh()");
-
+  boolean refreshIfExpired() {
     synchronized (instanceDataGuard) {
-      if (nextInstanceData.isDone()) {
-        currentInstanceData = performRefresh();
-        nextInstanceData = Futures.immediateFuture(currentInstanceData);
-      } else {
-        currentInstanceData = blockOnNestedFuture(nextInstanceData, executor);
+      if (currentInstanceData.isDone()) {
+        try {
+          InstanceData instanceData = currentInstanceData.get();
+          if (needRefresh(instanceData)) {
+            currentInstanceData = performRefresh();
+          }
+        } catch (InterruptedException | ExecutionException e) {
+          throw new RuntimeException(e);
+        }
       }
       return true;
     }
@@ -322,7 +318,9 @@ class CloudSqlInstance {
    * would expire.
    */
   private ListenableFuture<InstanceData> performRefresh() {
-    // To avoid unreasonable SQL Admin API usage, use a rate limit to throttle our usage. 
+    logger.finest("performRefresh()");
+
+    // To avoid unreasonable SQL Admin API usage, use a rate limit to throttle our usage.
     forcedRenewRateLimiter.acquire(1);
     // Use the Cloud SQL Admin API to return the Metadata and Certificate
     ListenableFuture<Metadata> metadataFuture = executor.submit(this::fetchMetadata);
@@ -389,7 +387,7 @@ class CloudSqlInstance {
                 // replace current if it is expired or invalid
                 currentInstanceData = refreshFuture;
               }
-              nextInstanceData = Futures.immediateFuture(performRefresh());
+              performRefresh();
             }
           }
         }, executor);
@@ -442,7 +440,7 @@ class CloudSqlInstance {
       sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), new SecureRandom());
 
       String certificateId = Base64.getUrlEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(ephemeralCertificate.getEncoded()));
-      logger.info("Storing ephemeral SSL certificate " + certificateId);
+      logger.finest("Storing ephemeral SSL certificate " + certificateId);
 
       return new SslData(sslContext, kmf, tmf, certificateId);
     } catch (GeneralSecurityException | IOException ex) {
@@ -584,22 +582,14 @@ class CloudSqlInstance {
     return credentials.get().getAccessToken().getExpirationTime();
   }
 
-  private boolean needRefresh() {
-    InstanceData instanceData = null;
-    try {
-      instanceData = getInstanceData();
-    } catch (Exception e) {
-      // this means the result was invalid
-      return true;
-    }
-
+  private boolean needRefresh(InstanceData instanceData) {
     Duration refreshBuffer = enableIamAuth ? IAM_AUTH_REFRESH_BUFFER : DEFAULT_REFRESH_BUFFER;
     Date expiration = instanceData.getExpiration();
     Duration timeUntilRefresh = Duration.between(Instant.now(), expiration.toInstant())
         .minus(refreshBuffer);
 
     if (timeUntilRefresh.isNegative()) {
-      logger.info("Need refresh of " + instanceData.getSslData().getCertificateId() + ", expired at " + expiration);
+      logger.finest("Need refresh of " + instanceData.getSslData().getCertificateId() + ", expired at " + expiration);
       return true;
     } else {
       return false;
@@ -652,9 +642,7 @@ class CloudSqlInstance {
   }
 
   SslData getSslData() {
-    if (needRefresh()) {
-      forceRefresh();
-    }
+    refreshIfExpired();
     return getInstanceData().getSslData();
   }
 
@@ -688,7 +676,7 @@ class CloudSqlInstance {
     }
 
     SslData getSslData() {
-      logger.info("Using ephemeral SSL certificate " + sslData.getCertificateId());
+      logger.finest("Using ephemeral SSL certificate " + sslData.getCertificateId());
       return sslData;
     }
   }
