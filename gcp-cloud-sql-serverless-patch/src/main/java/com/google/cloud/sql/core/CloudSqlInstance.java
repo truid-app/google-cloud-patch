@@ -296,7 +296,7 @@ class CloudSqlInstance {
    *
    * @return {@code true} if successfully scheduled, or {@code false} otherwise.
    */
-  boolean refreshIfExpired() {
+  private boolean refreshIfExpired() {
     synchronized (instanceDataGuard) {
       if (currentInstanceData.isDone()) {
         try {
@@ -307,6 +307,24 @@ class CloudSqlInstance {
         } catch (InterruptedException | ExecutionException e) {
           throw new RuntimeException(e);
         }
+      }
+      return true;
+    }
+  }
+
+  /**
+   * Attempts to force a new refresh of the instance data. May fail if called too frequently or if a
+   * new refresh is already in progress. If successful, other methods will block until refresh has
+   * been completed.
+   *
+   * @return {@code true} if successfully scheduled, or {@code false} otherwise.
+   */
+  boolean forceRefresh() {
+    logger.finer("forceRefresh()");
+
+    synchronized (instanceDataGuard) {
+      if (currentInstanceData.isDone()) {
+        currentInstanceData = performRefresh();
       }
       return true;
     }
