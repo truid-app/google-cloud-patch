@@ -20,49 +20,31 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 
-/**
- * This class stores data that can be used to establish Cloud SQL SSL connection.
- */
-public class SslData {
+/** This class stores data that can be used to establish Cloud SQL SSL connection. */
+class SslData {
 
-  private SSLContext sslContext;
-  private KeyManagerFactory keyManagerFactory;
-  private TrustManagerFactory trustManagerFactory;
-  private String certificateId;
+  private final SSLContext sslContext;
+  private final KeyManagerFactory keyManagerFactory;
+  private final TrustManagerFactory trustManagerFactory;
 
-  SslData(SSLContext sslContext, KeyManagerFactory keyManagerFactory,
-      TrustManagerFactory trustManagerFactory, String certificateId) {
+  SslData(
+      SSLContext sslContext,
+      KeyManagerFactory keyManagerFactory,
+      TrustManagerFactory trustManagerFactory) {
     this.sslContext = sslContext;
     this.keyManagerFactory = keyManagerFactory;
     this.trustManagerFactory = trustManagerFactory;
-    this.certificateId = certificateId;
   }
 
-  public SSLContext getSslContext() {
+  SSLContext getSslContext() {
     return sslContext;
   }
 
-  public void setSslContext(SSLContext sslContext) {
-    this.sslContext = sslContext;
-  }
-
-  public KeyManagerFactory getKeyManagerFactory() {
+  KeyManagerFactory getKeyManagerFactory() {
     return keyManagerFactory;
   }
 
-  public void setKeyManagerFactory(KeyManagerFactory keyManagerFactory) {
-    this.keyManagerFactory = keyManagerFactory;
-  }
-
-  public TrustManagerFactory getTrustManagerFactory() {
+  TrustManagerFactory getTrustManagerFactory() {
     return trustManagerFactory;
-  }
-
-  public void setTrustManagerFactory(TrustManagerFactory trustManagerFactory) {
-    this.trustManagerFactory = trustManagerFactory;
-  }
-
-  public String getCertificateId() {
-    return certificateId;
   }
 }
