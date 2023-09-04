@@ -25,10 +25,12 @@ import com.google.auth.oauth2.OAuth2Credentials;
 import com.google.cloud.sql.AuthType;
 import com.google.cloud.sql.CredentialFactory;
 import com.google.common.base.Throwables;
+import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.errorprone.annotations.concurrent.GuardedBy;
@@ -42,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -244,11 +247,16 @@ class CloudSqlInstance {
     synchronized (instanceDataGuard) {
       if (currentInstanceData.isDone()) {
         try {
-          InstanceData instanceData = currentInstanceData.get();
-          if (needRefresh(instanceData)) {
+          InstanceData instanceData = null;
+          try {
+            instanceData = currentInstanceData.get();
+          } catch (ExecutionException e) {
+            // needs refresh
+          }
+          if (instanceData == null || needRefresh(instanceData)) {
             currentInstanceData = performRefresh();
           }
-        } catch (InterruptedException | ExecutionException e) {
+        } catch (InterruptedException e) {
           throw new RuntimeException(e);
         }
       }
@@ -270,6 +278,22 @@ class CloudSqlInstance {
     }
   }
 
+  private ListenableFuture<InstanceData> performRefresh2() {
+    if (authType == AuthType.IAM) {
+      if (credentials.isPresent()) {
+        return apiFetcher.getInstanceData(instanceName, credentials.get(), AuthType.IAM, executor, keyPair);
+      } else {
+        throw new RuntimeException(
+            String.format(
+                "[%s] Unable to connect via automatic IAM authentication: Missing credentials.",
+                instanceName.getConnectionName()));
+      }
+
+    } else {
+      return apiFetcher.getInstanceData(instanceName, null, AuthType.PASSWORD, executor, keyPair);
+    }
+  }
+
   /**
    * Triggers an update of internal information obtained from the Cloud SQL Admin API. Replaces the
    * value of currentInstanceData and schedules the next refresh shortly before the information
@@ -281,63 +305,22 @@ class CloudSqlInstance {
     // To avoid unreasonable SQL Admin API usage, use a rate limit to throttle our usage.
     forcedRenewRateLimiter.acquirePermit();
 
-    ListenableFuture<InstanceData> refreshFuture;
-    if (authType == AuthType.IAM) {
-      if (credentials.isPresent()) {
-        refreshFuture =
-            apiFetcher.getInstanceData(
-                instanceName, credentials.get(), AuthType.IAM, executor, keyPair);
-      } else {
-        throw new RuntimeException(
-            String.format(
-                "[%s] Unable to connect via automatic IAM authentication: Missing credentials.",
-                instanceName.getConnectionName()));
+    ListenableFuture<InstanceData> refreshFuture = performRefresh2();
+
+    // Retry once on failure to fetch credentials
+    class InstanceDataListener extends AbstractFuture<InstanceData> implements FutureCallback<InstanceData> {
+      @Override public void onSuccess(InstanceData instanceData) {
+        set(instanceData);
       }
-
-    } else {
-      refreshFuture =
-          apiFetcher.getInstanceData(instanceName, null, AuthType.PASSWORD, executor, keyPair);
+      @Override public void onFailure(Throwable t) {
+        setFuture(performRefresh2());
+      }
     }
-    Futures.addCallback(
-        refreshFuture,
-        new FutureCallback<InstanceData>() {
-          @Override
-          public void onSuccess(InstanceData instanceData) {
-            synchronized (instanceDataGuard) {
-              // update currentInstanceData with the most recent results
-              currentInstanceData = refreshFuture;
-            }
-          }
 
-          @Override
-          public void onFailure(Throwable t) {
-            logger.log(
-                Level.WARNING,
-                "An error occurred while performing refresh. Retrying immediately.",
-                t);
-            synchronized (instanceDataGuard) {
-              InstanceData instanceData = null;
-              try {
-                instanceData = getInstanceData();
-              } catch (Exception e) {
-                // this means the result was invalid
-              }
-              if (instanceData == null
-                  || instanceData.getExpiration().toInstant().isBefore(Instant.now())) {
-                // replace current if it is expired or invalid
-                currentInstanceData = refreshFuture;
-              }
-              try {
-                performRefresh();
-              } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-              }
-            }
-          }
-        },
-        executor);
+    InstanceDataListener result = new InstanceDataListener();
+    Futures.addCallback(refreshFuture, result, MoreExecutors.directExecutor());
 
-    return refreshFuture;
+    return result;
   }
 
   private Optional<Date> getTokenExpirationTime(Credential credentials) {
