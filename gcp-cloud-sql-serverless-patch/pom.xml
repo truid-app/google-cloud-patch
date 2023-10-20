@@ -5,14 +5,19 @@
   <groupId>me.veritru.gcp</groupId>
   <artifactId>gcp-cloud-sql-serverless-patch</artifactId>
   <packaging>jar</packaging>
-  <version>1.14.0-1.0-SNAPSHOT</version>
+  <version>1.0-SNAPSHOT</version>
   <name>gcp-cloud-sql-serverless-patch</name>
+
+  <properties>
+    <jdbc-socket-factory-core-sql.version>1.14.0</jdbc-socket-factory-core-sql.version>
+    <version>${jdbc-socket-factory-core-sql.version}-${git.commit.time}-${git.commit.id.abbrev}</version>
+  </properties>
 
   <dependencies>
     <dependency>
       <groupId>com.google.cloud.sql</groupId>
       <artifactId>jdbc-socket-factory-core</artifactId>
-      <version>1.14.0</version>
+      <version>${jdbc-socket-factory-core-sql.version}</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
@@ -63,13 +68,40 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.0.0-M5</version>
       </plugin>
+      <plugin>
+        <groupId>pl.project13.maven</groupId>
+        <artifactId>git-commit-id-plugin</artifactId>
+        <version>4.9.10</version>
+        <configuration>
+          <dateFormatTimeZone>UTC</dateFormatTimeZone>
+          <offline>true</offline>
+          <generateGitPropertiesFile>false</generateGitPropertiesFile>
+          <dateFormat>yyyyMMdd.HHmmss</dateFormat>
+          <skipPoms>false</skipPoms>
+          <runOnlyOnce>true</runOnlyOnce>
+          <gitDescribe>
+            <skip>true</skip>
+          </gitDescribe>
+          <verbose>false</verbose>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>versions-maven-plugin</artifactId>
+        <version>2.9.0</version>
+        <configuration>
+          <generateBackupPoms>false</generateBackupPoms>
+          <updateMatchingVersions>false</updateMatchingVersions>
+          <newVersion>${version}</newVersion>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 
   <distributionManagement>
     <repository>
       <id>maven-inhouse</id>
-      <url>artifactregistry://europe-north1-maven.pkg.dev/veritru-dev-332314/maven-inhouse</url>
+      <url>artifactregistry://europe-north1-maven.pkg.dev/veritru-dev-332314/maven-main</url>
     </repository>
   </distributionManagement>
 </project>
