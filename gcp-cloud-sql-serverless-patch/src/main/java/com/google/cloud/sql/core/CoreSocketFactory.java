@@ -71,7 +71,7 @@ public final class CoreSocketFactory {
   @Deprecated public static final String USER_TOKEN_PROPERTY_NAME = "_CLOUD_SQL_USER_TOKEN";
 
   static final long DEFAULT_MAX_REFRESH_MS = 30000;
-  public static final String DEFAULT_IP_TYPES = "PUBLIC,PRIVATE";
+  public static final String DEFAULT_IP_TYPES = "PRIVATE,PUBLIC";
   private static final String UNIX_SOCKET_PROPERTY = "unixSocketPath";
   private static final Logger logger = Logger.getLogger(CoreSocketFactory.class.getName());
 
