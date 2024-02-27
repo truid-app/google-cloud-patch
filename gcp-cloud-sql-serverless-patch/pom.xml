@@ -9,7 +9,7 @@
   <name>gcp-cloud-sql-serverless-patch</name>
 
   <properties>
-    <jdbc-socket-factory-core-sql.version>1.14.0</jdbc-socket-factory-core-sql.version>
+    <jdbc-socket-factory-core-sql.version>1.14.1</jdbc-socket-factory-core-sql.version>
     <version>${jdbc-socket-factory-core-sql.version}-${git.commit.time}-${git.commit.id.abbrev}</version>
   </properties>
 

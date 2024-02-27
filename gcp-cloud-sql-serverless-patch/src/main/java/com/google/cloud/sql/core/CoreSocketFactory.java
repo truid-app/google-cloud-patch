@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Google Inc. All Rights Reserved.
+ * Copyright 2016 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.google.cloud.sql.AuthType;
 import com.google.cloud.sql.CredentialFactory;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
@@ -69,7 +70,8 @@ public final class CoreSocketFactory {
    */
   @Deprecated public static final String USER_TOKEN_PROPERTY_NAME = "_CLOUD_SQL_USER_TOKEN";
 
-  public static final String DEFAULT_IP_TYPES = "PRIVATE,PUBLIC";
+  static final long DEFAULT_MAX_REFRESH_MS = 30000;
+  public static final String DEFAULT_IP_TYPES = "PUBLIC,PRIVATE";
   private static final String UNIX_SOCKET_PROPERTY = "unixSocketPath";
   private static final Logger logger = Logger.getLogger(CoreSocketFactory.class.getName());
 
@@ -83,6 +85,7 @@ public final class CoreSocketFactory {
   private final ListeningScheduledExecutorService executor;
   private final CredentialFactory credentialFactory;
   private final int serverProxyPort;
+  private final long refreshTimeoutMs;
   private final ApiFetcherFactory apiFetcherFactory;
 
   @VisibleForTesting
@@ -91,12 +94,14 @@ public final class CoreSocketFactory {
       ApiFetcherFactory apiFetcherFactory,
       CredentialFactory credentialFactory,
       int serverProxyPort,
+      long refreshTimeoutMs,
       ListeningScheduledExecutorService executor) {
     this.apiFetcherFactory = apiFetcherFactory;
     this.credentialFactory = credentialFactory;
     this.serverProxyPort = serverProxyPort;
     this.executor = executor;
     this.localKeyPair = localKeyPair;
+    this.refreshTimeoutMs = refreshTimeoutMs;
   }
 
   /** Returns the {@link CoreSocketFactory} singleton. */
@@ -114,6 +119,7 @@ public final class CoreSocketFactory {
               new SqlAdminApiFetcherFactory(getUserAgents()),
               credentialFactory,
               DEFAULT_SERVER_PROXY_PORT,
+              CoreSocketFactory.DEFAULT_MAX_REFRESH_MS,
               executor);
     }
     return coreSocketFactory;
@@ -224,13 +230,15 @@ public final class CoreSocketFactory {
       List<String> delegates)
       throws IOException {
     if (enableIamAuth) {
-      return getInstance()
+      CoreSocketFactory factory = getInstance();
+      return factory
           .getCloudSqlInstance(csqlInstanceName, AuthType.IAM, targetPrincipal, delegates)
-          .getSslData();
+          .getSslData(factory.refreshTimeoutMs);
     }
-    return getInstance()
+    CoreSocketFactory factory = getInstance();
+    return factory
         .getCloudSqlInstance(csqlInstanceName, AuthType.PASSWORD, targetPrincipal, delegates)
-        .getSslData();
+        .getSslData(factory.refreshTimeoutMs);
   }
 
   /** Returns preferred ip address that can be used to establish Cloud SQL connection. */
@@ -245,20 +253,20 @@ public final class CoreSocketFactory {
       String instanceName, List<String> ipTypes, String targetPrincipal, List<String> delegates) {
     CloudSqlInstance instance =
         getCloudSqlInstance(instanceName, AuthType.PASSWORD, targetPrincipal, delegates);
-    return instance.getPreferredIp(ipTypes);
+    return instance.getPreferredIp(ipTypes, refreshTimeoutMs);
   }
 
   /**
    * Converts the string property of IP types to a list by splitting by commas, and upper-casing.
    */
   private static List<String> listIpTypes(String cloudSqlIpTypes) {
-    String[] rawTypes = cloudSqlIpTypes.split(",");
-    ArrayList<String> result = new ArrayList<>(rawTypes.length);
-    for (int i = 0; i < rawTypes.length; i++) {
-      if (rawTypes[i].trim().equalsIgnoreCase("PUBLIC")) {
-        result.add(i, "PRIMARY");
+    List<String> rawTypes = Splitter.on(',').splitToList(cloudSqlIpTypes);
+    ArrayList<String> result = new ArrayList<>(rawTypes.size());
+    for (String type : rawTypes) {
+      if (type.trim().equalsIgnoreCase("PUBLIC")) {
+        result.add("PRIMARY");
       } else {
-        result.add(i, rawTypes[i].trim().toUpperCase());
+        result.add(type.trim().toUpperCase());
       }
     }
     return result;
@@ -362,14 +370,14 @@ public final class CoreSocketFactory {
         getCloudSqlInstance(instanceName, authType, targetPrincipal, delegates);
 
     try {
-      SSLSocket socket = instance.createSslSocket();
+      SSLSocket socket = instance.createSslSocket(this.refreshTimeoutMs);
 
       // TODO(kvg): Support all socket related options listed here:
       // https://dev.mysql.com/doc/connector-j/en/connector-j-reference-configuration-properties.html
       socket.setKeepAlive(true);
       socket.setTcpNoDelay(true);
 
-      String instanceIp = instance.getPreferredIp(ipTypes);
+      String instanceIp = instance.getPreferredIp(ipTypes, refreshTimeoutMs);
 
       socket.connect(new InetSocketAddress(instanceIp, serverProxyPort));
       socket.startHandshake();
