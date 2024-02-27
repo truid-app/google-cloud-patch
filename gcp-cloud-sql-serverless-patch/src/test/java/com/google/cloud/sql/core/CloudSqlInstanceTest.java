@@ -5,6 +5,7 @@ import com.google.api.client.auth.oauth2.Credential;
 import com.google.cloud.sql.AuthType;
 import com.google.cloud.sql.CredentialFactory;
 import com.google.common.util.concurrent.AbstractFuture;
+import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
@@ -19,6 +20,8 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.security.KeyPair;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Date;
 import java.util.concurrent.Executors;
 
@@ -61,11 +64,11 @@ public class CloudSqlInstanceTest {
     public void shouldBeAbleToFetchData() throws Exception {
         SslData sslData = createSslData();
         when(instanceDataSupplier.getInstanceData(any(), any(), eq(AuthType.IAM), any(), any())).thenReturn(
-            validInstanceData(sslData)
+            Futures.immediateFuture(validInstanceData(sslData))
         );
 
         CloudSqlInstance inst = new CloudSqlInstance(connectionName, instanceDataSupplier, AuthType.IAM, tokenSourceFactory, executor, keyPair, rateLimiter);
-        SslData result = inst.getSslData();
+        SslData result = inst.getSslData(0);
         assertEquals(sslData, result);
         verify(instanceDataSupplier, times(1)).getInstanceData(any(), any(), eq(AuthType.IAM), any(), any());
     }
@@ -75,10 +78,10 @@ public class CloudSqlInstanceTest {
         SslData sslData = createSslData();
         when(instanceDataSupplier.getInstanceData(any(), any(), eq(AuthType.IAM), any(), any()))
             .thenThrow(new RuntimeException("knas"))
-            .thenReturn(validInstanceData(sslData));
+            .thenReturn(Futures.immediateFuture(validInstanceData(sslData)));
 
         CloudSqlInstance inst = new CloudSqlInstance(connectionName, instanceDataSupplier, AuthType.IAM, tokenSourceFactory, executor, keyPair, rateLimiter);
-        SslData result = inst.getSslData();
+        SslData result = inst.getSslData(0);
         assertEquals(sslData, result);
         verify(instanceDataSupplier, times(2)).getInstanceData(any(), any(), eq(AuthType.IAM), any(), any());
     }
@@ -87,14 +90,14 @@ public class CloudSqlInstanceTest {
     public void failOnRefreshShouldRetryOnce() throws Exception {
         SslData sslData = createSslData();
         when(instanceDataSupplier.getInstanceData(any(), any(), eq(AuthType.IAM), any(), any()))
-            .thenReturn(expiredInstanceData())
+            .thenReturn(Futures.immediateFuture(expiredInstanceData()))
             .thenThrow(new RuntimeException("knas"))
             .thenThrow(new RuntimeException("knas"))
-            .thenReturn(validInstanceData(sslData));
+            .thenReturn(Futures.immediateFuture(validInstanceData(sslData)));
 
         CloudSqlInstance inst = new CloudSqlInstance(connectionName, instanceDataSupplier, AuthType.IAM, tokenSourceFactory, executor, keyPair, rateLimiter);
-        assertThrows(RuntimeException.class, inst::getSslData);
-        SslData result = inst.getSslData();
+        assertThrows(RuntimeException.class, () -> inst.getSslData(0));
+        SslData result = inst.getSslData(0);
         assertEquals(sslData, result);
         verify(instanceDataSupplier, times(4)).getInstanceData(any(), any(), eq(AuthType.IAM), any(), any());
     }
@@ -105,10 +108,10 @@ public class CloudSqlInstanceTest {
         when(instanceDataSupplier.getInstanceData(any(), any(), eq(AuthType.IAM), any(), any()))
             .thenThrow(new RuntimeException("knas"))
             .thenThrow(new RuntimeException("knas"))
-            .thenReturn(validInstanceData(sslData));
+            .thenReturn(Futures.immediateFuture(validInstanceData(sslData)));
 
         CloudSqlInstance inst = new CloudSqlInstance(connectionName, instanceDataSupplier, AuthType.IAM, tokenSourceFactory, executor, keyPair, rateLimiter);
-        SslData result = inst.getSslData();
+        SslData result = inst.getSslData(0);
         assertEquals(sslData, result);
         verify(instanceDataSupplier, times(3)).getInstanceData(any(), any(), eq(AuthType.IAM), any(), any());
     }
@@ -117,14 +120,14 @@ public class CloudSqlInstanceTest {
     public void failTwiceOnRefreshShouldRetryOnNextRefresh() throws Exception {
         SslData sslData = createSslData();
         when(instanceDataSupplier.getInstanceData(any(), any(), eq(AuthType.IAM), any(), any()))
-            .thenReturn(expiredInstanceData())
+            .thenReturn(Futures.immediateFuture(expiredInstanceData()))
             .thenThrow(new RuntimeException("knas"))
             .thenThrow(new RuntimeException("knas"))
-            .thenReturn(validInstanceData(sslData));
+            .thenReturn(Futures.immediateFuture(validInstanceData(sslData)));
 
         CloudSqlInstance inst = new CloudSqlInstance(connectionName, instanceDataSupplier, AuthType.IAM, tokenSourceFactory, executor, keyPair, rateLimiter);
-        assertThrows(RuntimeException.class, inst::getSslData);
-        SslData result = inst.getSslData();
+        assertThrows(RuntimeException.class, () -> inst.getSslData(0));
+        SslData result = inst.getSslData(0);
         assertEquals(sslData, result);
         verify(instanceDataSupplier, times(4)).getInstanceData(any(), any(), eq(AuthType.IAM), any(), any());
     }
@@ -146,10 +149,10 @@ public class CloudSqlInstanceTest {
     }
 
     InstanceData validInstanceData(SslData sslData) {
-        return new InstanceData(null, sslData, new Date(System.currentTimeMillis() + 3600000));
+        return new InstanceData(null, sslData, Instant.now().plus(Duration.ofHours(1)));
     }
 
     InstanceData expiredInstanceData() {
-        return new InstanceData(null, createSslData(), new Date(System.currentTimeMillis() - 1000));
+        return new InstanceData(null, createSslData(), Instant.now().minus(Duration.ofSeconds(1)));
     }
 }
